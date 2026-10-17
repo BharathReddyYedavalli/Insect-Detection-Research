@@ -1,0 +1,30 @@
+# Resolved configuration is written to each run; edit model-specific config instead.
+dataset:
+  root: data/ip102_v1.1
+  num_classes: 102
+  image_size: 224
+  workers: 4
+training:
+  epochs: 40
+  batch_size: 32
+  learning_rate: 0.0002
+  weight_decay: 0.0001
+  optimizer: adamw
+  scheduler: cosine
+  min_lr: 0.000001
+  label_smoothing: 0.0
+  balance: none         # none | weighted_sampler | equal_epoch | weighted_loss
+  equal_samples_per_class: 100
+  patience: 12
+  monitor: macro_f1     # macro_f1 | accuracy | balanced_accuracy | loss
+  seed: 42
+  pretrained: true
+  amp: true
+  deterministic: false
+  grad_clip: 1.0
+  resume: null
+augmentation:
+  horizontal_flip: true
+  rotation_degrees: 12
+  color_jitter: 0.15
+  random_resized_crop: true
