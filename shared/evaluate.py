@@ -38,7 +38,7 @@ def main():
     model = build_model(config["model"], config["dataset"]["num_classes"], pretrained=False).to(device)
     model.load_state_dict(state["model_state"])
     size = config["dataset"]["image_size"]
-    ds = IP102Dataset(root, splits[args.split], build_transform(size, False, config["augmentation"]))
+    ds = IP102Dataset(root, splits[args.split], build_transform(size, False))
     loader = make_loader(ds, args.batch_size, args.workers, False, device=device.type)
     criterion = nn.CrossEntropyLoss()
     scores, ys, probs, indices = infer(model, loader, criterion, device,
