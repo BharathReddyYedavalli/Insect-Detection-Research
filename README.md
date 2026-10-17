@@ -21,7 +21,28 @@ python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda
 
 If your installed NVIDIA driver cannot support this build, update it and consult [PyTorch's official selector](https://pytorch.org/get-started/locally/) for a compatible Windows CUDA install. Installing `requirements.txt` alone does **not** install the GPU-enabled PyTorch wheels.
 
-### Dataset setup
+### Kaggle ZIP importer (recommended if your ZIP has `classification/test/0/*.jpg`)
+
+If you downloaded a roughly 3 GB Kaggle `archive.zip` with `classification/{train,val,test}/<class>/<filename>.jpg`, you **do not have to reorganize 75,000 files by hand**. Run this in the repository root in PowerShell:
+
+```powershell
+git pull
+python -m shared.import_kaggle --zip "$HOME\Downloads\archive.zip" --inspect-only
+```
+
+Compare the printed counts to the **official CVPR 2019 splits: train 45,095, val 7,508, test 22,619** (75,222 images, 102 classes). If all counts match, extract directly into the expected folder layout:
+
+```powershell
+python -m shared.import_kaggle --zip "$HOME\Downloads\archive.zip"
+python -m shared.audit --data-root data/ip102_v1.1
+```
+
+This reads the ZIP directly and writes images to `data/ip102_v1.1/images/train/0/...` etc. It creates `train.txt`, `val.txt`, and `test.txt` **using existing folder memberships, without randomized splitting**, saves an `import_manifest.json`, and verifies image paths. It does not use Kaggle class names as labels, since the folder indices are already the labels. If split counts differ, investigate your Kaggle source before continuing; matching counts alone still do not prove exact correspondence to the authors' split lists.
+
+**Do not manually unzip the archive first** when using this importer: it would unnecessarily duplicate the image files. Have enough local disk space for the extracted images in addition to the ZIP.
+
+### Original classification archive (alternative)
+
 
 Download **Classification** from [IP102 official dataset](https://github.com/xpwu95/IP102) ([Google Drive](https://drive.google.com/drive/folders/1svFSy2Da3cVMvekBwe13mzyx38XZ9xWo?usp=sharing)). Extract the **classification** archive into `data/ip102_v1.1/`, ensuring the folder contains:
 ```text
