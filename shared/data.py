@@ -141,6 +141,22 @@ class IP102Dataset(Dataset):
         return self.transform(img), record.label, index
 
 
+class EpochWeightedSampler(WeightedRandomSampler):
+    """Weighted draws reproducible by epoch (including after checkpoint resume)."""
+    def __init__(self, weights, num_samples: int, seed: int):
+        super().__init__(weights, num_samples=num_samples, replacement=True)
+        self.seed = seed
+        self.epoch = 0
+
+    def set_epoch(self, epoch: int):
+        self.epoch = epoch
+
+    def __iter__(self):
+        generator = torch.Generator().manual_seed(self.seed + self.epoch)
+        return iter(torch.multinomial(self.weights, self.num_samples,
+                                      self.replacement, generator=generator).tolist())
+
+
 class ExactBalancedSampler(Sampler[int]):
     """Exactly K sampled indices per class per epoch, with replacement if needed."""
     def __init__(self, labels: list[int], samples_per_class: int, seed: int = 0):
@@ -199,8 +215,7 @@ def make_loader(dataset: IP102Dataset, batch_size: int, workers: int, training: 
     if training and balance == "weighted_sampler":
         counts = Counter(dataset.targets)
         weights = torch.tensor([1.0 / counts[t] for t in dataset.targets], dtype=torch.double)
-        sampler = WeightedRandomSampler(weights, num_samples=len(dataset), replacement=True,
-                                        generator=torch.Generator().manual_seed(seed))
+        sampler = EpochWeightedSampler(weights, num_samples=len(dataset), seed=seed)
     elif training and balance == "equal_epoch":
         sampler = ExactBalancedSampler(dataset.targets, equal_k, seed)
     elif balance not in ("none", "weighted_loss"):
