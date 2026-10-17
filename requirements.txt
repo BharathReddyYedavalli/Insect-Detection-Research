@@ -1,0 +1,9 @@
+# Install torch/torchvision CUDA wheels separately (see README).
+numpy>=1.26,<3
+pandas>=2.2,<3
+Pillow>=10.0
+PyYAML>=6.0
+matplotlib>=3.8
+scikit-learn>=1.4
+tqdm>=4.66
+pytest>=8.0
