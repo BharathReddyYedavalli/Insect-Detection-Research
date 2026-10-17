@@ -37,8 +37,8 @@ data/ip102_v1.1/
 python -m shared.audit --data-root data/ip102_v1.1
 python models/ResNet18/train.py --epochs 5
 python models/ResNet50/train.py --epochs 40 --batch-size 32 --balance weighted_sampler
-python models/VGG16/train.py --epochs 35 --batch-size 16
-python models/VGG19/train.py --epochs 35 --batch-size 16
+python models/VGG16/train.py --epochs 35 --batch-size 8
+python models/VGG19/train.py --epochs 35 --batch-size 8
 ```
 
 Each model gets a separate `models/<Name>/runs/<timestamp>_<shortid>/` with:
@@ -72,3 +72,23 @@ Run 3+ seeds for each architecture at the same resolution/splits, first natural 
 
 ### Official citation and license
 IP102 is released for academic usage. For other uses, contact the dataset authors. Cite: Wu et al., **IP102: A Large-Scale Benchmark Dataset for Insect Pest Recognition**, CVPR 2019. This repository is an independent experimental implementation; it is not affiliated with the IP102 authors.
+
+
+### Useful commands and troubleshooting
+
+```powershell
+# inspect training options
+python models/ResNet18/train.py --help
+
+# compare baseline vs exact balanced sampling
+python models/ResNet18/train.py --epochs 40 --balance none --seed 42
+python models/ResNet18/train.py --epochs 40 --balance equal_epoch --equal-k 100 --seed 42
+
+# resume an interrupted training run (you may extend the horizon with --epochs)
+python models/ResNet18/train.py --resume "models/ResNet18/runs/YOUR_RUN/last_model.pth" --epochs 50
+
+# run small synthetic-data CPU tests before downloading IP102
+python -m pytest -q
+```
+
+If VGG reports CUDA out-of-memory, retry in a **new** run with `--batch-size 4` or `--batch-size 2`; do not assume that a particular batch size is guaranteed on every 5070 configuration. The sampler's exact balance applies to **draws per epoch**, not the native distribution or eventual model performance. Model outputs are stored locally and deliberately ignored by Git.
