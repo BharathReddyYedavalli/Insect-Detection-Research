@@ -1,21 +1,18 @@
-"""Official IP102 classification splits, strict integrity checks and train-only balancing.
+"""Official IP102 splits and straightforward image classification data loading.
 
 No images are copied and no new random train/val/test split is created.
 """
 from __future__ import annotations
-from collections import Counter, defaultdict
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 import csv
 import json
-import random
-import re
 
 import numpy as np
 import torch
 from PIL import Image, ImageFile
-from torch.utils.data import Dataset, DataLoader, Sampler, WeightedRandomSampler
+from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms as T
 
 ImageFile.LOAD_TRUNCATED_IMAGES = False
@@ -141,97 +138,30 @@ class IP102Dataset(Dataset):
         return self.transform(img), record.label, index
 
 
-class EpochWeightedSampler(WeightedRandomSampler):
-    """Weighted draws reproducible by epoch (including after checkpoint resume)."""
-    def __init__(self, weights, num_samples: int, seed: int):
-        super().__init__(weights, num_samples=num_samples, replacement=True)
-        self.seed = seed
-        self.epoch = 0
 
-    def set_epoch(self, epoch: int):
-        self.epoch = epoch
+def build_transform(size: int, training: bool = False, aug: dict | None = None):
+    """No on-the-fly augmentation: augmented images were saved during preparation.
 
-    def __iter__(self):
-        generator = torch.Generator().manual_seed(self.seed + self.epoch)
-        return iter(torch.multinomial(self.weights, self.num_samples,
-                                      self.replacement, generator=generator).tolist())
+    Resize/crop and ImageNet normalization are deterministic for all splits.
+    """
+    return T.Compose([
+        T.Resize(int(size * 256 / 224)),
+        T.CenterCrop(size),
+        T.ToTensor(),
+        T.Normalize(MEAN, STD),
+    ])
 
 
-class ExactBalancedSampler(Sampler[int]):
-    """Exactly K sampled indices per class per epoch, with replacement if needed."""
-    def __init__(self, labels: list[int], samples_per_class: int, seed: int = 0):
-        self.groups: dict[int, list[int]] = defaultdict(list)
-        for i, label in enumerate(labels):
-            self.groups[label].append(i)
-        self.samples_per_class = samples_per_class
-        self.seed = seed
-        self.epoch = 0
-        if not self.groups or samples_per_class < 1:
-            raise ValueError("Need nonempty classes and samples_per_class >= 1")
-
-    def __len__(self):
-        return len(self.groups) * self.samples_per_class
-
-    def set_epoch(self, epoch: int):
-        self.epoch = epoch
-
-    def __iter__(self):
-        rng = random.Random(self.seed + self.epoch)
-        indices = []
-        for group in self.groups.values():
-            if len(group) >= self.samples_per_class:
-                indices.extend(rng.sample(group, self.samples_per_class))
-            else:
-                indices.extend(rng.choices(group, k=self.samples_per_class))
-        rng.shuffle(indices)
-        return iter(indices)
-
-
-def build_transform(size: int, training: bool, aug: dict):
-    if training:
-        steps = []
-        if aug.get("random_resized_crop", True):
-            steps.append(T.RandomResizedCrop(size, scale=(0.75, 1.0)))
-        else:
-            steps += [T.Resize(int(size * 1.14)), T.RandomCrop(size)]
-        if aug.get("horizontal_flip", True):
-            steps.append(T.RandomHorizontalFlip())
-        if aug.get("rotation_degrees", 0):
-            steps.append(T.RandomRotation(aug["rotation_degrees"]))
-        if aug.get("color_jitter", 0):
-            steps.append(T.ColorJitter(brightness=aug["color_jitter"],
-                                       contrast=aug["color_jitter"],
-                                       saturation=aug["color_jitter"]))
-    else:
-        steps = [T.Resize(int(size * 256 / 224)), T.CenterCrop(size)]
-    steps.extend([T.ToTensor(), T.Normalize(MEAN, STD)])
-    return T.Compose(steps)
-
-
-def make_loader(dataset: IP102Dataset, batch_size: int, workers: int, training: bool,
-                balance: str = "none", seed: int = 42, equal_k: int = 100,
-                device: str = "cpu"):
-    sampler = None
-    if training and balance == "weighted_sampler":
-        counts = Counter(dataset.targets)
-        weights = torch.tensor([1.0 / counts[t] for t in dataset.targets], dtype=torch.double)
-        sampler = EpochWeightedSampler(weights, num_samples=len(dataset), seed=seed)
-    elif training and balance == "equal_epoch":
-        sampler = ExactBalancedSampler(dataset.targets, equal_k, seed)
-    elif balance not in ("none", "weighted_loss"):
-        raise ValueError(f"Unknown balance mode: {balance}")
-    generator = torch.Generator().manual_seed(seed)
+def make_loader(dataset: IP102Dataset, batch_size: int, workers: int,
+                training: bool, seed: int = 42, device: str = "cpu"):
+    if batch_size < 1 or workers < 0:
+        raise ValueError("batch_size must be >=1 and workers must be >=0")
     return DataLoader(
-        dataset, batch_size=batch_size, shuffle=training and sampler is None,
-        sampler=sampler, num_workers=workers, pin_memory=device == "cuda",
-        persistent_workers=workers > 0, generator=generator
+        dataset,
+        batch_size=batch_size,
+        shuffle=training,
+        num_workers=workers,
+        pin_memory=device == "cuda",
+        persistent_workers=workers > 0,
+        generator=torch.Generator().manual_seed(seed),
     )
-
-
-def class_weights(labels: list[int], n: int, device):
-    counts = np.bincount(labels, minlength=n).astype(np.float64)
-    if np.any(counts == 0):
-        raise ValueError("Cannot weight class with zero training examples")
-    weights = counts.sum() / (n * counts)
-    weights /= weights.mean()
-    return torch.tensor(weights, dtype=torch.float32, device=device)
