@@ -1,0 +1,16 @@
+# Data, pretrained weights, and reproducible training artifacts stay LOCAL
+data/
+**/runs/
+comparisons/
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+*.py[cod]
+.env
+.DS_Store
+Thumbs.db
