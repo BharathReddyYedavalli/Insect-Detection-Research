@@ -1,0 +1,7 @@
+dataset:
+  image_size: 224
+training:
+  epochs: 40
+  batch_size: 48
+  learning_rate: 0.0002
+  balance: none
