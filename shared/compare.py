@@ -1,4 +1,4 @@
-"""Aggregate distinct model/seed/balancing runs into tables and plots."""
+"""Compare model runs by validation metrics, keeping old runs readable."""
 from __future__ import annotations
 import argparse
 from datetime import datetime
@@ -37,7 +37,7 @@ def main():
         config = yaml.safe_load(config_file.read_text(encoding="utf-8"))
         result = json.loads(file.read_text(encoding="utf-8"))
         row = {"run": str(run), "model": config["model"],
-               "balance": config["training"]["balance"],
+               "balance": config["training"].get("balance", "offline_augmented"),
                "seed": config["training"]["seed"],
                "epochs_requested": config["training"]["epochs"],
                "best_epoch": result["best_epoch"],
