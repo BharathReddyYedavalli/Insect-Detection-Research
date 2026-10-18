@@ -65,7 +65,8 @@ class InsectDataset(Dataset):
         # This extra, mild augmentation is optional and applied ONLY while training.
         if split == "train" and extra_augmentation:
             steps = [
-                transforms.Resize((image_size, image_size)),
+                transforms.Resize(int(image_size * 256 / 224)),
+                transforms.CenterCrop(image_size),
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(degrees=8),
             ]
