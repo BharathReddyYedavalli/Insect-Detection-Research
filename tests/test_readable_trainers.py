@@ -1,6 +1,9 @@
 """Regression test for the readable single-file ResNet18 training entrypoint."""
 import ast
 import json
+import hashlib
+import pandas as pd
+import torch
 from pathlib import Path
 import subprocess
 import sys
@@ -39,6 +42,8 @@ def test_all_four_model_scripts_are_selfcontained():
             assert f"def {function}(" in text
         assert "nn.CrossEntropyLoss()" in text
         assert "--extra-augmentation" in text
+        assert "--resume" in text
+        assert 'optimizer.load_state_dict(resume_checkpoint["optimizer_state"])' in text
 
 
 def test_resnet18_readable_script_trains_and_reports(tmp_path):
@@ -68,3 +73,42 @@ def test_resnet18_readable_script_trains_and_reports(tmp_path):
     assert result["n_samples"] == 3
     assert result["classes_present"] == 3
     assert result["best_epoch"] == 1
+
+    # Continue saved checkpoint weights, optimizer and original epoch history.
+    # The original run and its checkpoint must not change.
+    original_checkpoint = run / "last_model.pth"
+    prior_digest = hashlib.sha256(original_checkpoint.read_bytes()).hexdigest()
+    resumed = tmp_path / "resumed_result"
+    resume_cmd = [
+        sys.executable, str(ROOT / "models" / "ResNet18" / "train.py"),
+        "--data-root", str(balanced),
+        "--output-dir", str(resumed),
+        "--classes", "3", "--image-size", "32",
+        "--epochs", "2", "--batch-size", "2",
+        "--workers", "0", "--no-pretrained",
+        "--resume", str(original_checkpoint),
+    ]
+    continued = subprocess.run(resume_cmd, cwd=ROOT, capture_output=True, text=True, timeout=240)
+    assert continued.returncode == 0, continued.stdout[-3000:] + continued.stderr[-3000:]
+    assert "Continuing from epoch 1 to 2" in continued.stdout
+    assert (resumed / "best_model.pth").is_file()
+    state = torch.load(resumed / "last_model.pth", weights_only=False, map_location="cpu")
+    assert state["epoch"] == 2
+    assert state["config"]["resume"]["completed_epochs"] == 1
+    history = pd.read_csv(resumed / "history.csv")
+    assert history["epoch"].tolist() == [1, 2]
+    assert (resumed / "validation_metrics.json").is_file()
+    assert (resumed / "graphs" / "accuracy_by_epoch.png").is_file()
+    assert hashlib.sha256(original_checkpoint.read_bytes()).hexdigest() == prior_digest
+    assert pd.read_csv(run / "history.csv")["epoch"].tolist() == [1]
+
+    # Changing learning rate would invalidate controlled continuation.
+    invalid = tmp_path / "invalid_result"
+    mismatch_cmd = resume_cmd[:]
+    mismatch_cmd[mismatch_cmd.index(str(resumed))] = str(invalid)
+    mismatch_cmd.extend(["--lr", "0.002"])
+    bad = subprocess.run(mismatch_cmd, cwd=ROOT, capture_output=True, text=True, timeout=120)
+    assert bad.returncode != 0
+    assert "Resume settings differ" in bad.stderr
+    assert not invalid.exists()
+
