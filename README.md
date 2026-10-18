@@ -10,7 +10,9 @@ A PyTorch image-classification research project for the **official IP102 dataset
 4. Pick **best checkpoint by validation accuracy**; save history, `.pth` weights, per-class scores, confusion matrices, reliability plots, and comparison CSVs.
 5. **After** selecting the model and settings on validation, run the locked checkpoint on the held-out test split. Never pick hyperparameters using test results.
 
-This version intentionally does **not** use weighted loss, weighted sampling, on-the-fly augmentation, cosine schedulers or early stopping. Earlier research outputs under `models/*/runs/` stay untouched; the new code is a different experimental protocol.
+Each model now has a **complete, readable training program** in `models/<Model>/train.py` (dataset class, model, training, validation, saving, and learning curves). The original import/audit/balancing utilities remain separate because those run only when preparing the dataset. Detailed paper-grade confusion matrices and calibration plots reuse `shared/metrics.py` and `shared/plots.py`.
+
+There are **no class-weighted losses, weighted samplers, LR schedulers or early stopping**. Simple random flips and small rotations can be enabled independently with `--extra-augmentation` for a controlled anti-overfitting experiment; they are not enabled by default. Earlier research outputs under `models/*/runs/` stay untouched.
 
 ## Windows RTX 5070 environment
 
@@ -82,15 +84,21 @@ The metadata records how many original images were retained, augmented and exclu
 
 ## Train on a prepared dataset
 
+The default learning rate for the new readable trainers is **0.0001**, based on the ResNet18 results you observed (65.70% best val at 1e-4, versus 64.85% at 2e-4; both 12 epochs). That does **not** guarantee improvement in a future run or in other architectures.
+
 For the full all-originals-preserved augmented dataset:
 
 ```powershell
-python models/ResNet18/train.py --epochs 3 --batch-size 32
-python models/ResNet18/train.py --epochs 30 --batch-size 32
-python models/ResNet50/train.py --epochs 30 --batch-size 16
-python models/VGG16/train.py --epochs 30 --batch-size 8
-python models/VGG19/train.py --epochs 30 --batch-size 4
+# First: test simple additional train-only augmentation on the balanced dataset.
+python models/ResNet18/train.py --epochs 12 --batch-size 32 --lr 0.0001 --extra-augmentation
+
+# Other models, after comparing results and deciding on protocol:
+python models/ResNet50/train.py --epochs 12 --batch-size 16
+python models/VGG16/train.py --epochs 12 --batch-size 8
+python models/VGG19/train.py --epochs 12 --batch-size 4
 ```
+
+The `--extra-augmentation` option only transforms training images on each epoch using mild horizontal flips and rotations. It does not rebalance classes again or change evaluation images. Run the same command **without** `--extra-augmentation` to compare; you already have an earlier low-LR unaugmented balanced run from the previous implementation.
 
 For the 600-per-class pilot, explicitly set the root on every model invocation:
 
@@ -100,15 +108,15 @@ python models/ResNet18/train.py --data-root data/ip102_balanced_600 --epochs 3 -
 
 Training automatically verifies that the `augmentation_manifest.json`, split fingerprints and per-class counts match; if not, it refuses to start. If you run out of GPU memory, retry with a smaller `--batch-size`. These runs are independent and can be compared only after documenting their differing sample counts and training budgets.
 
-Per-model defaults live in `models/<Model>/config.yaml`. To adjust settings directly from PowerShell, use `--epochs`, `--batch-size`, `--lr`, `--seed` and `--workers`. The script has no balancing choices at training time: it simply reads preprocessed images from disk.
+Each `models/<Model>/train.py` holds its own training code and CLI defaults; the earlier `config.yaml` files are preserved for older runs but are **not read** by the new trainers. Set `--epochs`, `--batch-size`, `--lr`, `--seed`, `--workers`, `--image-size` or `--extra-augmentation` in PowerShell. The script has no balancing choices at training time: it reads preprocessed images from disk.
 
 ## Outputs and evaluation
 
 Each experiment automatically creates a separate `models/<Model>/runs/<run_id>/` containing:
 
-- `parameters.txt`, `config.yaml`, `augmentation_manifest.json`, `environment.json`, `splits_sha256.json`
+- `config.yaml`, `augmentation_manifest.json`, `splits_sha256.json`
 - `history.csv`, `best_model.pth`, `last_model.pth`, `validation_metrics.json`
-- `graphs/` — loss, accuracy, training time, LR and GPU memory
+- `graphs/` — loss, accuracy and validation macro-F1 learning curves
 - `validation_evaluation/` — confusion matrices (including normalized), class recall/F1, support plots, calibrated confidence and probability-correlation matrices, prediction CSVs
 
 The **test data stays untouched during training**. After fixing a final training protocol based on validation, evaluate the selected checkpoint once:
