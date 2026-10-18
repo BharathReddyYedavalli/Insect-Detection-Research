@@ -45,7 +45,7 @@ def test_resnet18_readable_script_trains_and_reports(tmp_path):
     original = tmp_path / "original"
     create_dataset(original)
     balanced = tmp_path / "balanced"
-    prepare(original, balanced, target_per_class=3, seed=42, size=48, num_classes=3)
+    prepare(original, balanced, target_per_class=4, seed=42, size=48, num_classes=3)
     run = tmp_path / "training_result"
     cmd = [
         sys.executable,
