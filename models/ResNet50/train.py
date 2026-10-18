@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import random
+import shutil
 import sys
 import time
 from collections import Counter
@@ -192,6 +193,9 @@ def main():
                         help="102 for IP102; small values only for synthetic tests")
     parser.add_argument("--output-dir", type=Path,
                         help="Optional new experiment directory")
+    parser.add_argument("--resume", type=Path,
+                        help="Continue from a prior run's last_model.pth into a NEW run folder; "
+                             "--epochs is the TOTAL desired epoch count")
     args = parser.parse_args()
     if args.epochs < 1 or args.batch_size < 1 or args.workers < 0 or args.image_size < 32:
         parser.error("epochs/batch-size must be positive, workers >=0 and image-size >=32")
@@ -220,6 +224,73 @@ def main():
         pin_memory=use_amp, persistent_workers=args.workers > 0,
     )
 
+    # A resumed run must load optimizer state as well as model weights. The
+    # earlier folder is never edited. Fail before creating any new files if
+    # the requested settings or dataset differ from the checkpoint.
+    resume_checkpoint = None
+    prior_history = []
+    prior_best_path = None
+    resume_source = None
+    if args.resume is not None:
+        resume_source = args.resume.expanduser().resolve()
+        if resume_source.name != "last_model.pth" or not resume_source.is_file():
+            parser.error("--resume must point to an existing last_model.pth, not best_model.pth")
+        # Only load checkpoints you produced yourself and trust.
+        resume_checkpoint = torch.load(resume_source, map_location="cpu", weights_only=False)
+        old_config = resume_checkpoint.get("config", {})
+        old_dataset = old_config.get("dataset", {})
+        old_training = old_config.get("training", {})
+        old_augmentation = old_config.get("augmentation", {})
+        required = {
+            "model": MODEL_NAME,
+            "dataset_root": str(dataset_root),
+            "num_classes": args.classes,
+            "image_size": args.image_size,
+            "batch_size": args.batch_size,
+            "learning_rate": args.lr,
+            "weight_decay": args.weight_decay,
+            "seed": args.seed,
+            "pretrained": not args.no_pretrained,
+            "amp": use_amp,
+            "extra_training_augmentation": args.extra_augmentation,
+        }
+        stored = {
+            "model": old_config.get("model"),
+            "dataset_root": str(Path(old_dataset.get("root", "")).expanduser().resolve()),
+            "num_classes": old_dataset.get("num_classes"),
+            "image_size": old_dataset.get("image_size"),
+            "batch_size": old_training.get("batch_size"),
+            "learning_rate": old_training.get("learning_rate"),
+            "weight_decay": old_training.get("weight_decay"),
+            "seed": old_training.get("seed"),
+            "pretrained": old_training.get("pretrained"),
+            "amp": old_training.get("amp"),
+            "extra_training_augmentation": old_augmentation.get("extra_training_augmentation"),
+        }
+        mismatches = [name for name in required if required[name] != stored[name]]
+        if mismatches:
+            parser.error("Resume settings differ from checkpoint: " + ", ".join(mismatches))
+        if resume_checkpoint.get("split_fingerprints") != hashes:
+            parser.error("Cannot resume: dataset split hashes differ from the checkpoint")
+        initial_epoch = resume_checkpoint.get("epoch")
+        if not isinstance(initial_epoch, int) or initial_epoch < 1 or args.epochs <= initial_epoch:
+            parser.error("--epochs must exceed the checkpoint's completed epoch count")
+        prior_history_path = resume_source.parent / "history.csv"
+        prior_best_path = resume_source.parent / "best_model.pth"
+        if not prior_history_path.is_file() or not prior_best_path.is_file():
+            parser.error("Resume requires history.csv and best_model.pth beside last_model.pth")
+        prior_history = pd.read_csv(prior_history_path).to_dict("records")
+        if not prior_history or int(prior_history[-1]["epoch"]) != initial_epoch:
+            parser.error("Checkpoint epoch and source history.csv do not agree")
+        if [int(row["epoch"]) for row in prior_history] != list(range(1, initial_epoch + 1)):
+            parser.error("Source history.csv has missing or repeated epochs")
+        if not all(k in resume_checkpoint for k in (
+                "model_state", "optimizer_state", "best_accuracy", "best_epoch")):
+            parser.error("Resume checkpoint is missing required training state")
+        best_state = torch.load(prior_best_path, map_location="cpu", weights_only=False)
+        if best_state.get("epoch") != resume_checkpoint["best_epoch"]:
+            parser.error("Source best_model.pth does not match the last checkpoint's best epoch")
+
     # Create a new folder for every run; never overwrite earlier checkpoints.
     run = args.output_dir or (ROOT / "models" / MODEL_TITLE / "runs" /
                                f"{datetime.now():%Y%m%d_%H%M%S}_{uuid4().hex[:6]}")
@@ -240,23 +311,53 @@ def main():
         },
         "augmentation": {"extra_training_augmentation": args.extra_augmentation},
     }
+    if resume_source is not None:
+        config["resume"] = {
+            "source_checkpoint": str(resume_source),
+            "completed_epochs": resume_checkpoint["epoch"],
+            "exact_rng_restored": "rng_state" in resume_checkpoint,
+        }
+        shutil.copy2(prior_best_path, run / "best_model.pth")
     (run / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     (run / "augmentation_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     (run / "splits_sha256.json").write_text(json.dumps(hashes, indent=2), encoding="utf-8")
 
-    model = get_model(args.classes, pretrained=not args.no_pretrained).to(device)
+    model = get_model(args.classes, pretrained=not args.no_pretrained and resume_checkpoint is None).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr,
                                   weight_decay=args.weight_decay)
     scaler = GradScaler("cuda", enabled=use_amp)
-    history = []
+    history = prior_history
     best_accuracy, best_epoch = -1.0, 0
+    starting_epoch = 1
+    if resume_checkpoint is not None:
+        model.load_state_dict(resume_checkpoint["model_state"])
+        optimizer.load_state_dict(resume_checkpoint["optimizer_state"])
+        if resume_checkpoint.get("scaler_state") is not None:
+            scaler.load_state_dict(resume_checkpoint["scaler_state"])
+        best_accuracy = float(resume_checkpoint["best_accuracy"])
+        best_epoch = int(resume_checkpoint["best_epoch"])
+        starting_epoch = int(resume_checkpoint["epoch"]) + 1
+        # Older checkpoints have no recorded RNG state. They still resume
+        # weights and optimizer correctly, but not bit-for-bit randomness.
+        rng = resume_checkpoint.get("rng_state")
+        if rng is not None:
+            random.setstate(rng["python"])
+            np.random.set_state(rng["numpy"])
+            torch.set_rng_state(rng["torch_cpu"])
+            if use_amp and rng.get("torch_cuda") is not None:
+                torch.cuda.set_rng_state_all(rng["torch_cuda"])
+            train_loader.generator.set_state(rng["loader"])
+
+    if resume_checkpoint is not None:
+        print(f"Continuing from epoch {starting_epoch-1} to {args.epochs}. "
+              f"Previous checkpoint and history remain untouched.", flush=True)
 
     print(f"{MODEL_TITLE} | {device} | train={len(train_set):,} "
           f"({manifest['target_per_class']:,}/class) | val={len(val_set):,} | "
           f"lr={args.lr} | extra_aug={args.extra_augmentation} | output={run}", flush=True)
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(starting_epoch, args.epochs + 1):
         started = time.perf_counter()
         model.train()
         running_loss, correct_predictions, seen = 0.0, 0, 0
@@ -305,6 +406,13 @@ def main():
             "model_state": model.state_dict(), "optimizer_state": optimizer.state_dict(),
             "epoch": epoch, "best_accuracy": best_accuracy, "best_epoch": best_epoch,
             "config": config, "split_fingerprints": hashes,
+            "scaler_state": scaler.state_dict(),
+            "rng_state": {
+                "python": random.getstate(), "numpy": np.random.get_state(),
+                "torch_cpu": torch.get_rng_state(),
+                "torch_cuda": torch.cuda.get_rng_state_all() if use_amp else None,
+                "loader": train_loader.generator.get_state(),
+            },
         }
         # Save both the most recent checkpoint and the highest validation accuracy.
         temp = run / "last_model.writing"
