@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import random
 import sys
 import time
@@ -116,6 +115,8 @@ def main():
                    help="TOTAL optimizer updates in either condition.")
     p.add_argument("--eval-every", type=int, default=11000)
     p.add_argument("--checkpoint-every", type=int, default=1000)
+    p.add_argument("--run-until", type=int,
+                   help="Optionally stop this invocation at an optimizer step and resume later.")
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--lr", type=float, default=0.0001)
     p.add_argument("--weight-decay", type=float, default=0.0001)
@@ -136,6 +137,8 @@ def main():
         p.error("Invalid batch size, learning rate, workers, or classes.")
     if args.image_size < 32:
         p.error("Image size must be at least 32.")
+    if args.run_until is not None and not 1 <= args.run_until <= args.steps:
+        p.error("--run-until must be between 1 and --steps.")
     if args.resume is not None and args.output_dir is not None:
         p.error("Do not use --output-dir with --resume.")
 
@@ -221,8 +224,11 @@ def main():
         out.mkdir(parents=True, exist_ok=False)
         (out / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
+    stop_step = args.run_until if args.run_until is not None else args.steps
+    if stop_step < step:
+        p.error("--run-until is before the saved checkpoint step.")
     sampler = MatchedStepBatchSampler(
-        len(train_data), args.batch_size, args.seed, step, args.steps
+        len(train_data), args.batch_size, args.seed, step, stop_step
     )
     train_loader = DataLoader(
         train_data, batch_sampler=sampler, num_workers=args.workers,
@@ -253,7 +259,7 @@ def main():
           f"val={len(val_data):,} original images | batch={args.batch_size} | "
           f"steps={args.steps:,} | output={out}", flush=True)
     started = time.perf_counter()
-    progress = tqdm(train_loader, total=args.steps - step, desc=args.condition)
+    progress = tqdm(train_loader, total=stop_step - step, desc=args.condition)
     for images, labels, _ in progress:
         model.train()
         images = images.to(device, non_blocking=True)
@@ -299,6 +305,13 @@ def main():
         if needs_eval or step % args.checkpoint_every == 0:
             save_state(out / "last_model.pth")
             pd.DataFrame(history).to_csv(out / "history.csv", index=False)
+
+    if step < args.steps:
+        save_state(out / "last_model.pth")
+        pd.DataFrame(history).to_csv(out / "history.csv", index=False)
+        print("Paused at step " + str(step) + ". Resume from " +
+              str(out / "last_model.pth"), flush=True)
+        return
 
     # Produce paper-ready class-level output for the selected validation checkpoint.
     best = torch.load(out / "best_model.pth", weights_only=False, map_location="cpu")
