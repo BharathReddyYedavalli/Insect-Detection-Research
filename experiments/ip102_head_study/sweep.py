@@ -1,7 +1,7 @@
 """Run a deliberately small, staged IP102 head-hyperparameter sweep.
 
 Pilot: 2 models x linear head x 2 learning rates x 5 epochs = 4 runs.
-Heads: 2 models x 2 MLP heads x 1 learning rate x 10 epochs = 4 runs.
+Heads: 2 models x 3 heads (including linear control) x 1 LR x 10 epochs = 6 runs.
 Afterward manually select final 20-epoch configurations, trained from scratch.
 
 Run ONE configuration at a time; finished runs are skipped and interrupted ones resumed:
@@ -28,7 +28,7 @@ def grid(preset):
     if preset == "heads":
         return list(itertools.product(
             ("resnet50", "convnext_tiny"),
-            ("mlp512", "mlp1024_256"), (0.0001,), (10,)
+            ("linear", "mlp512", "mlp1024_256"), (0.0001,), (10,)
         ))
     raise ValueError(preset)
 
