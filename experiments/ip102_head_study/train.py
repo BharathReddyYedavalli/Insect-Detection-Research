@@ -9,9 +9,7 @@ Only the official validation split is used to select checkpoints. Test is untouc
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import os
 import random
 import sys
 import time
@@ -190,6 +188,8 @@ def main(argv=None):
     p.add_argument("--no-pretrained", action="store_true", help="For synthetic CPU smoke tests.")
     p.add_argument("--output-dir", type=Path, default=None)
     p.add_argument("--resume", type=Path, default=None)
+    p.add_argument("--stop-after-epoch", type=int, default=None,
+                   help="Optional safe partial run without changing the total planned epochs.")
     args = p.parse_args(argv)
     if args.epochs < 1 or args.epochs > 20:
         p.error("--epochs must be between 1 and 20 for this study.")
@@ -199,6 +199,8 @@ def main(argv=None):
         p.error("Require learning rate > 0 and 0 <= min-lr <= lr.")
     if not (0 <= args.dropout < 1 and 0 <= args.label_smoothing < 1):
         p.error("Dropout/label smoothing must be between 0 and 1.")
+    if args.stop_after_epoch is not None and not 1 <= args.stop_after_epoch <= args.epochs:
+        p.error("--stop-after-epoch must be between 1 and total --epochs.")
     if args.resume and args.output_dir:
         p.error("Do not specify --output-dir with --resume.")
 
@@ -352,6 +354,10 @@ def main(argv=None):
         draw_curves(history, run)
         print(f"Epoch {epoch}: accuracy={val['accuracy']*100:.2f}% "
               f"macro-F1={val['macro_f1']*100:.2f}% best_epoch={best_epoch}", flush=True)
+        if args.stop_after_epoch is not None and epoch == args.stop_after_epoch and epoch < args.epochs:
+            print(f"PAUSED at epoch {epoch}/{args.epochs}. Resume with "
+                  f"--resume \"{run / 'last_model.pth'}\"", flush=True)
+            return
 
     best = torch.load(run / "best_model.pth", map_location="cpu", weights_only=False)
     model.load_state_dict(best["model_state"])
