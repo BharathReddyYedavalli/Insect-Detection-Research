@@ -58,7 +58,7 @@ python experiments/ip102_head_study/sweep.py --preset pilot --max-runs 1
 
 Re-running the last command skips completed runs and runs the next. It resumes interrupted runs with saved checkpoints.
 
-**Phase 2 — classifier depth (10 epochs each)**: both backbones, one hidden layer versus two, default `lr=1e-4` (4 runs):
+**Phase 2 — classifier depth (10 epochs each)**: both backbones, linear baseline, one hidden layer, and two hidden layers at the same `lr=1e-4` (6 runs). The linear control is repeated at 10 epochs so head-depth comparisons have equal training budgets:
 ```powershell
 python experiments/ip102_head_study/sweep.py --preset heads --max-runs 1
 ```
