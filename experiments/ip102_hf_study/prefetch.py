@@ -5,7 +5,11 @@ Run: python experiments/ip102_hf_study/prefetch.py
 """
 from __future__ import annotations
 import argparse
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 
 from huggingface_hub import hf_hub_download
 from experiments.ip102_hf_study.train import MODELS
