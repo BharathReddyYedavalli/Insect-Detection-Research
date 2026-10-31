@@ -48,6 +48,13 @@ In PowerShell:
 
 Do NOT replace your existing CUDA-enabled PyTorch wheels with CPU-only versions.
 You don't need to download Hugging Face weights manually.
+To **prefetch all three pretrained checkpoints into the HF cache** before any
+training, optionally run:
+
+    python experiments/ip102_hf_study/prefetch.py
+
+This downloads each model's config, image processor and safetensors weights,
+verifies their local sizes, and does not start IP102 training.
 
 ## Step 1: ConvNeXt-Small, low-memory baseline (recommended first)
 
