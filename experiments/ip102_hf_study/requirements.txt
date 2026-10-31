@@ -1,0 +1,6 @@
+# Additional dependencies for the Hugging Face pretrained-model study.
+# First install the root requirements and your CUDA-enabled PyTorch/torchvision.
+-r ../../requirements.txt
+transformers>=4.53,<5
+huggingface-hub>=0.30,<1
+safetensors>=0.5
