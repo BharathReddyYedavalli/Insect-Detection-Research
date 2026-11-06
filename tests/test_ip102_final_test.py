@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 pytest.importorskip("transformers")
 
 from shared.data import IP102Dataset, Record, dataset_summary, load_splits
-from experiments.ip102_hf_study import final_test
+from experiments.ip102_hf_study import final_evaluate as final_test
 
 
 def write_tiny_official_structure(root: Path):
