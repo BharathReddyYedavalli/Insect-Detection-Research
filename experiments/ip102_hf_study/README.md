@@ -160,3 +160,74 @@ A single held-out test evaluation belongs **only after** choosing the final
 method on validation data. Our next objective is >77.39% **test** top-1
 accuracy, but the pretrained checkpoints and experimental changes do not
 guarantee that outcome.
+
+
+## Frozen final evaluation (added after validation experiments, November 2026)
+
+**Freeze decision BEFORE reading test results:** The official IP102
+**22,619-image held-out test split** will be evaluated exactly once with the
+**validation-selected equal-weight four-model ensemble**. Its fixed members:
+
+| Member | Seed | Checkpoint-selection rule | Final weight |
+| --- | --- | --- | --- |
+| DINOv2 ViT-B/14, last 3 transformer blocks fine-tuned | 42 | Best validation accuracy | 0.25 |
+| DINOv2 ViT-B/14, last 3 transformer blocks fine-tuned | 43 | Best validation accuracy | 0.25 |
+| DINOv2 ViT-B/14, last 3 transformer blocks fine-tuned | 44 | Best validation accuracy | 0.25 |
+| Swin Transformer-Base, ImageNet-21K initialization | 42 | Best validation accuracy | 0.25 |
+
+These four run names are hardcoded in final_test.py, with strict checks that
+the current local dataset fingerprints, model identities, checkpoint configs,
+seeds, classifier types, and best-epoch selection match the completed
+validation experiments. The selected 4-model ensemble achieved **78.61%
+validation top-1 accuracy and 71.31% macro-F1**. Those are **NOT** test scores.
+
+### First: safe metadata-only preflight
+
+Pull the latest code. Then run from repository root:
+
+    python experiments/ip102_hf_study/final_test.py
+
+It prints the selected checkpoint paths, validation scores, and official split
+counts. It **does not open, score, or process test images** and creates no output.
+Check that all four local checkpoint files exist.
+
+### Then: ONE-TIME official held-out test evaluation
+
+Only after the preflight succeeds, run the frozen evaluation:
+
+    python experiments/ip102_hf_study/final_test.py --execute
+
+It loads the **locally saved best_model.pth** from each of the four training
+runs, restores every parameter strictly, and uses deterministic test transforms
+and each model's original AMP mode. It runs one model at a time to fit GPU
+memory. The probability average uses fixed weights 0.25 per checkpoint.
+The script does not train or change model parameters.
+
+Results are written only to a uniquely named folder under
+**experiments/ip102_hf_study/final_test_results/**:
+
+- manifest.json: SHA-256 checkpoint hashes, original IP102 split hashes,
+  frozen ensemble recipe, single-model metrics and final combined metrics;
+- model_*/: each frozen checkpoint's test metrics, confusion matrix, per-class
+  metrics, and classification plots;
+- ensemble_test_evaluation/: combined official test metrics, per-image
+  predictions, class-level scores, confusion matrix and plots;
+- ensemble_test_probabilities.npz: all 102 class probabilities and ordered
+  sample identifiers for auditability.
+
+The script refuses to overwrite an existing final result folder.
+It fails rather than silently loading a different classifier or checkpoint,
+or silently evaluating a changed IP102 split.
+
+**Research integrity:** Compare the resulting *test* top-1 and macro-F1 against
+published papers evaluated on the SAME official classification split and
+protocol. If the score is disappointing, report it honestly. Do not tune
+ensemble weights, choose another checkpoint, or adjust preprocessing based
+on test outcomes. Keep the complete validation experiments and the final test
+result for the paper.
+
+Because model sources use different pretraining corpora, the comparison is a
+transfer-learning deployment study, not evidence that one backbone
+architecture alone caused an accuracy difference. The 2024 weighted
+ensemble's 77.39% is a **test-set** score; validation scores are not directly
+comparable.
