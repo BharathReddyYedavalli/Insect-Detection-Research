@@ -5,6 +5,7 @@ on:
     paths:
       - "experiments/ip102_hf_study/**"
       - "tests/test_ip102_hf_study.py"
+      - "tests/test_ip102_final_test.py"
       - ".github/workflows/ip102-hf-smoke.yml"
   workflow_dispatch:
 
@@ -24,4 +25,4 @@ jobs:
       - name: Install study dependencies
         run: pip install -r experiments/ip102_hf_study/requirements.txt
       - name: Run offline HF study smoke tests
-        run: python -m pytest tests/test_ip102_hf_study.py -q
+        run: python -m pytest tests/test_ip102_hf_study.py tests/test_ip102_final_test.py -q
