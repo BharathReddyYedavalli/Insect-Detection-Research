@@ -129,11 +129,11 @@ def create_model(cfg: dict, checkpoint: dict):
     return model
 
 
-def test_predict(model, loader, device, amp_mode, model_name):
+def test_predict(model, loader, device, amp_mode, model_name, image_size):
     model.eval()
     names, labels, probs = [], [], []
     kwargs = {}
-    if model_name == "swin_base" and loader.dataset.transform.transforms[0].size != 224:
+    if model_name == "swin_base" and image_size != 224:
         kwargs["interpolate_pos_encoding"] = True
     use_amp = device.type == "cuda" and amp_mode != "off"
     dtype = torch.bfloat16 if amp_mode == "bf16" else torch.float16
@@ -202,7 +202,7 @@ def run_once(args):
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False,
                             num_workers=args.workers, pin_memory=True)
         names, labels, probs = test_predict(
-            model, loader, device, cfg["amp"], cfg["model"]
+            model, loader, device, cfg["amp"], cfg["model"], int(cfg["image_size"])
         )
         if not np.array_equal(names, expected_names) or not np.array_equal(labels, expected_labels):
             raise ValueError(f"Official test example order or labels don't match: {detail['run']}")
@@ -216,12 +216,10 @@ def run_once(args):
         detail_record = {
             "run": detail["run"], "hf_repo": cfg["repo"],
             "revision": cfg.get("resolved_revision") or cfg.get("requested_revision"),
-            "seed": cfg["seed"], "best_epoch": checkpoint_cfg["epochs"],
+            "seed": cfg["seed"], "best_epoch": detail["validation_best_epoch"],
             "weight": ENSEMBLE_WEIGHTS[index], "checkpoint_sha256": checksum,
             "test_scores": model_scores,
         }
-        # Report actual selected checkpoint epoch, not overall training horizon.
-        detail_record["best_epoch"] = detail["validation_best_epoch"]
         manifest["models"].append(detail_record)
         (folder / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         print(f"Frozen model {index + 1}: test accuracy={model_scores['accuracy']*100:.2f}%, "
