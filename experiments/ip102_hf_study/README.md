@@ -175,7 +175,7 @@ guarantee that outcome.
 | DINOv2 ViT-B/14, last 3 transformer blocks fine-tuned | 44 | Best validation accuracy | 0.25 |
 | Swin Transformer-Base, ImageNet-21K initialization | 42 | Best validation accuracy | 0.25 |
 
-These four run names are hardcoded in final_test.py, with strict checks that
+These four run names are hardcoded in final_evaluate.py, with strict checks that
 the current local dataset fingerprints, model identities, checkpoint configs,
 seeds, classifier types, and best-epoch selection match the completed
 validation experiments. The selected 4-model ensemble achieved **78.61%
@@ -185,7 +185,7 @@ validation top-1 accuracy and 71.31% macro-F1**. Those are **NOT** test scores.
 
 Pull the latest code. Then run from repository root:
 
-    python experiments/ip102_hf_study/final_test.py
+    python experiments/ip102_hf_study/final_evaluate.py
 
 It prints the selected checkpoint paths, validation scores, and official split
 counts. It **does not open, score, or process test images** and creates no output.
@@ -195,7 +195,7 @@ Check that all four local checkpoint files exist.
 
 Only after the preflight succeeds, run the frozen evaluation:
 
-    python experiments/ip102_hf_study/final_test.py --execute
+    python experiments/ip102_hf_study/final_evaluate.py --execute
 
 It loads the **locally saved best_model.pth** from each of the four training
 runs, restores every parameter strictly, and uses deterministic test transforms
